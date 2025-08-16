@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { loadImage, findWatermark, inpaintRect } from "./image-processor";
+import { loadImage, inpaintRect, toGray, drawToSize } from "./image-processor";
 import type { Match } from "./image-processor";
 
 // Create a worker lazily when on the client; Next.js bundles this with new URL.
@@ -21,7 +21,20 @@ export default function Home() {
   const fullCanvasRef = useRef<HTMLCanvasElement>(null); // hidden full-res canvas
   const workerRef = useRef<Worker | null>(null);
   type WorkerResult = { match: Match | null; scaleToFull: number };
-  type WorkerRequest = { id: string; type: "find"; imageSrc: string };
+  type WorkerRequest =
+    | { id: string; type: "find"; imageSrc: string }
+    | {
+        id: string;
+        type: "findGray";
+        smallGray: Float32Array;
+        smallW: number;
+        smallH: number;
+        tplGray: Float32Array;
+        tplW: number;
+        tplH: number;
+        scaleToFull: number;
+      };
+  type WorkerFindGrayPayload = Omit<Extract<WorkerRequest, { type: "findGray" }>, "id" | "type">;
   type WorkerResponse = { id: string; ok: boolean; result?: WorkerResult; error?: string };
   const pendingRef = useRef(
     new Map<string, { resolve: (value: WorkerResult) => void; reject: (reason?: unknown) => void; timer?: number }>()
@@ -88,6 +101,26 @@ export default function Home() {
     });
   }, []);
 
+  const callFindGray = useCallback(
+    (payload: WorkerFindGrayPayload): Promise<WorkerResult> => {
+      const w = workerRef.current;
+      if (!w) return Promise.reject(new Error("Worker unavailable"));
+      const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      return new Promise<WorkerResult>((resolve, reject) => {
+        const timer = window.setTimeout(() => {
+          pendingRef.current.delete(id);
+          reject(new Error("Worker timeout"));
+        }, 30000);
+        pendingRef.current.set(id, { resolve, reject, timer });
+        const msg: WorkerRequest = { id, type: "findGray", ...payload } as WorkerRequest;
+        // Transfer underlying ArrayBuffers to avoid cloning cost
+        const transfers: Transferable[] = [payload.smallGray.buffer, payload.tplGray.buffer];
+        w.postMessage(msg as any, transfers);
+      });
+    },
+    []
+  );
+
   // ---------- UI handlers ----------
   const onFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -148,15 +181,38 @@ export default function Home() {
       setStatus("Searching watermark…");
       let match: Match | null = null;
       let scaleToFull = 1;
-      // Prefer worker; fallback to main-thread if unavailable or fails
+      // Always use worker. Prefer array path (no OffscreenCanvas requirement); legacy as fallback.
       try {
+        // Prepare small grayscale on main thread (fast) and send to worker
+        const { canvas: smallCanvas, scale } = drawToSize(img, 720);
+        const smallCtx = smallCanvas.getContext("2d")!;
+        const smallData = smallCtx.getImageData(0, 0, smallCanvas.width, smallCanvas.height);
+        const smallGray = toGray(smallData.data);
+        // Template grayscale
+        const tplImg = await loadImage("/xcom_dark.png");
+        const tCanvas = document.createElement("canvas");
+        tCanvas.width = tplImg.width;
+        tCanvas.height = tplImg.height;
+        const tCtx = tCanvas.getContext("2d")!;
+        tCtx.drawImage(tplImg, 0, 0);
+        const tData = tCtx.getImageData(0, 0, tplImg.width, tplImg.height);
+        const tplGray = toGray(tData.data);
+        const res = await callFindGray({
+          smallGray,
+          smallW: smallCanvas.width,
+          smallH: smallCanvas.height,
+          tplGray,
+          tplW: tplImg.width,
+          tplH: tplImg.height,
+          scaleToFull: 1 / scale,
+        });
+        match = res.match;
+        scaleToFull = res.scaleToFull;
+      } catch (err) {
+        console.warn("findGray failed, falling back to worker decode path:", err);
         const res = await callFind(originalImage);
         match = res.match;
         scaleToFull = res.scaleToFull;
-      } catch {
-        const r = await findWatermark(img);
-        match = r.match;
-        scaleToFull = r.scaleToFull;
       }
       if (!match) {
         setError("Could not detect the X.com watermark. Make sure the avatar+name area is visible.");
@@ -194,12 +250,62 @@ export default function Home() {
   }, [originalImage, process]);
 
   const download = useCallback(() => {
+    // Deprecated: kept as a fallback in non-iOS browsers
     if (!processedImage) return;
     const a = document.createElement("a");
     a.href = processedImage;
     a.download = "xcom-unwatermarked.png";
     a.click();
   }, [processedImage]);
+
+  // --- iOS-friendly saving ---
+  const isIOS = typeof navigator !== "undefined" && /iP(hone|od|ad)/.test(navigator.userAgent);
+  const isSafari = typeof navigator !== "undefined" && /Safari\/.+ Version\//.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+
+  const saveToPhotos = useCallback(async () => {
+    if (!processedImage) return;
+    try {
+      // Convert data URL to Blob
+      const res = await fetch(processedImage);
+      const blob = await res.blob();
+      const fileName = "xcom-unwatermarked.png";
+
+      // Prefer the Web Share API with files (iOS share sheet includes "Save Image")
+      const file = new File([blob], fileName, { type: blob.type || "image/png" });
+      const canShareFiles = typeof navigator !== "undefined" && (navigator as any).canShare?.({ files: [file] });
+      if (canShareFiles && (navigator as any).share) {
+        try {
+          await (navigator as any).share({ files: [file], title: "Unwatermarked image" });
+          return;
+        } catch (err) {
+          // If user cancels or share fails, fall through to next fallback
+        }
+      }
+
+      // Fallback on iOS Safari: open the image in a new tab; users can long-press and "Save Image"
+      if (isIOS && isSafari) {
+        const objectUrl = URL.createObjectURL(blob);
+        // Opening in a user gesture context should avoid popup blockers
+        window.open(objectUrl, "_blank");
+        // Revoke shortly after to avoid leaking; Safari keeps resource alive for open tab
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 10000);
+        return;
+      }
+
+      // Desktop and others: standard download
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(objectUrl);
+    } catch (e) {
+      // Final fallback: try the original data URL download method
+      download();
+    }
+  }, [processedImage, isIOS, isSafari, download]);
 
   const reset = () => {
     setOriginalImage(null);
@@ -264,7 +370,7 @@ export default function Home() {
             size: number;
             phase: number;
             speed: number;
-          }> = Array.from({ length: 8 }, (_, i) => ({
+          }> = Array.from({ length: 8 }, () => ({
             x: Math.random() * cw,
             y: 0,
             size: Math.random() * 3 + 1,
@@ -458,8 +564,11 @@ export default function Home() {
           </h1>
           <div className="flex gap-4 text-sm">
             {processedImage && (
-              <button onClick={download} className="text-zinc-300/80 hover:text-zinc-100">
-                Download
+              <button
+                onClick={isIOS && isSafari ? saveToPhotos : download}
+                className="text-zinc-300/80 hover:text-zinc-100"
+              >
+                {isIOS && isSafari ? "Save to Photos" : "Download"}
               </button>
             )}
             {(originalImage || processedImage) && (
@@ -538,7 +647,9 @@ export default function Home() {
                     <img
                       src={(showOriginal ? originalImage : processedImage) ?? undefined}
                       alt="preview"
-                      className="max-h-full max-w-full object-contain"
+                      className="max-h-full max-w-full object-contain select-none"
+                      draggable={false}
+                      style={{ WebkitUserSelect: "none", userSelect: "none" }}
                     />
                   </div>
                 )}
