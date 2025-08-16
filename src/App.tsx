@@ -22,7 +22,7 @@ export default function Home() {
   const workerRef = useRef<Worker | null>(null);
   type WorkerResult = { match: Match | null; scaleToFull: number };
   type WorkerRequest =
-    | { id: string; type: "find"; imageSrc: string }
+    | { id: string; type: "find"; imageSrc: string; templateUrl: string }
     | {
         id: string;
         type: "findGray";
@@ -92,7 +92,8 @@ export default function Home() {
         reject(new Error("Worker timeout"));
       }, 30000);
       pendingRef.current.set(id, { resolve, reject, timer });
-      const msg: WorkerRequest = { id, type: "find", imageSrc };
+      const templateUrl = `${import.meta.env.BASE_URL}xcom_dark.png`;
+      const msg: WorkerRequest = { id, type: "find", imageSrc, templateUrl };
       w.postMessage(msg);
     });
   }, []);
@@ -185,7 +186,7 @@ export default function Home() {
         const smallData = smallCtx.getImageData(0, 0, smallCanvas.width, smallCanvas.height);
         const smallGray = toGray(smallData.data);
         // Template grayscale
-        const tplImg = await loadImage("/xcom_dark.png");
+        const tplImg = await loadImage(`${import.meta.env.BASE_URL}xcom_dark.png`);
         const tCanvas = document.createElement("canvas");
         tCanvas.width = tplImg.width;
         tCanvas.height = tplImg.height;

@@ -137,7 +137,7 @@ const drawToSizeOffscreen = async (
 // Small helper to yield to the event loop (like rAF)
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
-async function findWatermarkWorker(imageSrc: string): Promise<{ match: Match | null; scaleToFull: number }> {
+async function findWatermarkWorker(imageSrc: string, templateUrl: string): Promise<{ match: Match | null; scaleToFull: number }> {
   console.log("running worker findWatermarkWorker")
   // Decode full image
   const imgBlob = await (await fetch(imageSrc)).blob();
@@ -150,7 +150,7 @@ async function findWatermarkWorker(imageSrc: string): Promise<{ match: Match | n
   const smallGray = toGray(smallData.data);
 
   // Load template once per call (fast and cached by browser)
-  const tplBlob = await (await fetch('/xcom_dark.png', { cache: 'force-cache' })).blob();
+  const tplBlob = await (await fetch(templateUrl, { cache: 'force-cache' })).blob();
   const tplBitmap = await createImageBitmap(tplBlob);
 
   const scales = [0.4, 0.5, 0.6, 0.75, 0.9, 1.0, 1.1, 1.25, 1.4, 1.6, 1.8];
@@ -325,7 +325,7 @@ async function findWatermarkFromGray(
 }
 
 // ---------- RPC wiring ----------
-type FindReq = { id: string; type: 'find'; imageSrc: string };
+type FindReq = { id: string; type: 'find'; imageSrc: string; templateUrl: string };
 type FindGrayReq = {
   id: string;
   type: 'findGray';
@@ -346,7 +346,7 @@ self.onmessage = async (evt: MessageEvent<Req>) => {
   try {
     if (msg.type === 'find') {
       if (!(self as unknown as { OffscreenCanvas?: unknown }).OffscreenCanvas) throw new Error('OffscreenCanvas not supported');
-      const result = await findWatermarkWorker(msg.imageSrc);
+      const result = await findWatermarkWorker(msg.imageSrc, msg.templateUrl);
       (self as unknown as { postMessage: (m: Res) => void }).postMessage({ id: msg.id, ok: true, result });
       return;
     }
