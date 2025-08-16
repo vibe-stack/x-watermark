@@ -555,24 +555,36 @@ export default function Home() {
       />
 
       <div className="relative max-w-5xl mx-auto px-4 py-8">
-        <header className="mb-8 flex items-center justify-between">
-          <h1 className="text-xl sm:text-2xl font-medium text-zinc-100 tracking-tight">
-            Remove Watermark
-          </h1>
-          <div className="flex gap-4 text-sm">
-            {processedImage && (
-              <button
-                onClick={isIOS && isSafari ? saveToPhotos : download}
-                className="text-zinc-300/80 hover:text-zinc-100"
-              >
-                {isIOS && isSafari ? "Save to Photos" : "Download"}
-              </button>
-            )}
-            {(originalImage || processedImage) && (
-              <button onClick={reset} className="text-zinc-500 hover:text-zinc-300">
-                Reset
-              </button>
-            )}
+        <header className="mb-8">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl sm:text-2xl font-medium text-zinc-100 tracking-tight">
+              Remove Watermark
+            </h1>
+            <div className="flex gap-4 text-sm">
+              {processedImage && (
+                <button
+                  onClick={isIOS && isSafari ? saveToPhotos : download}
+                  className="text-zinc-300/80 hover:text-zinc-100"
+                >
+                  {isIOS && isSafari ? "Save to Photos" : "Download"}
+                </button>
+              )}
+              {(originalImage || processedImage) && (
+                <button onClick={reset} className="text-zinc-500 hover:text-zinc-300">
+                  Reset
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="mt-2">
+            <a
+              href="https://x.com/alightinastorm"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-zinc-500 hover:text-zinc-400 transition-colors"
+            >
+              made by @alightinastorm
+            </a>
           </div>
         </header>
 
