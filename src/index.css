@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --background: #08080a;
+  --foreground: #e5e7eb;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --background: #0b0b0e; /* keep dark aesthetic even in light */
+    --foreground: #e5e7eb;
+  }
+}
+
+body {
+  background: radial-gradient(900px 900px at 85% 75%, rgba(120,70,180,0.05), transparent 60%),
+    radial-gradient(600px 600px at 20% 10%, rgba(80,80,120,0.06), transparent 60%),
+    var(--background);
+  color: var(--foreground);
+}
