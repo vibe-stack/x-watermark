@@ -8,5 +8,18 @@ export default defineConfig(({ command }) => ({
   base: command === 'build' ? '/x-watermark/' : '/',
   server: {
     allowedHosts: true,
-  }
+  },
+  worker: {
+    format: 'es',
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: undefined,
+      },
+    },
+  },
+  define: {
+    global: 'globalThis',
+  },
 }))

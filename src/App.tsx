@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { loadImage, inpaintRect, toGray, drawToSize } from "./image-processor";
 import type { Match } from "./image-processor";
+import WatermarkWorker from "./watermark.worker.ts?worker";
 
-// Create a worker lazily when on the client; Next.js bundles this with new URL.
-const createWatermarkWorker = () =>
-  new Worker(new URL("./watermark.worker.ts", import.meta.url), { type: "module" });
+// Create a worker lazily when on the client
+const createWatermarkWorker = () => new WatermarkWorker();
 
 export default function Home() {
   // UI state
@@ -47,12 +47,8 @@ export default function Home() {
     try {
       if (!workerRef.current) workerRef.current = createWatermarkWorker();
     } catch (e) {
-      // Try classic mode as fallback
-      try {
-        workerRef.current = new Worker(new URL("./watermark.worker.ts", import.meta.url));
-      } catch {
-        workerRef.current = null;
-      }
+      console.error("Failed to create worker:", e);
+      workerRef.current = null;
     }
 
     const w = workerRef.current;
